@@ -117,9 +117,38 @@ public:
         SpiLcdDisplay::SetupUI();
 
         DisplayLockGuard lock(this);
-        lv_obj_set_style_pad_left(status_bar_, LV_HOR_RES*  0.1, 0);
-        lv_obj_set_style_pad_right(status_bar_, LV_HOR_RES*  0.1, 0);
+        FitRoundScreen();
         lv_display_add_event_cb(display_, rounder_event_cb, LV_EVENT_INVALIDATE_AREA, NULL);
+    }
+
+private:
+    // Mochi: the panel is a 466 px circle, so keep everything inside it. The
+    // circle is ~190 px wide 25 px below the top and ~290 px wide 50 px above
+    // the bottom; the sizes below follow from that.
+    void FitRoundScreen() {
+        const int w = LV_HOR_RES;
+        const int top_inset = 22;
+        if (top_bar_ == nullptr || bottom_bar_ == nullptr || chat_message_label_ == nullptr) {
+            return;  // only the default (non-WeChat) message style is laid out here
+        }
+
+        // Top: icons and status text in the middle of the narrow top.
+        lv_obj_set_style_pad_top(top_bar_, top_inset, 0);
+        lv_obj_set_style_pad_left(top_bar_, w * 0.3, 0);
+        lv_obj_set_style_pad_right(top_bar_, w * 0.3, 0);
+        lv_obj_set_style_pad_top(status_bar_, top_inset, 0);
+        lv_obj_set_width(status_label_, w * 0.4);
+        lv_obj_set_width(notification_label_, w * 0.4);
+
+        // Bottom: chat text in a narrower, raised, rounded box.
+        const int chat_width = w * 0.6;
+        lv_obj_set_width(bottom_bar_, chat_width);
+        lv_obj_set_style_radius(bottom_bar_, 16, 0);
+        lv_obj_align(bottom_bar_, LV_ALIGN_BOTTOM_MID, 0, -50);
+        lv_obj_set_width(chat_message_label_, chat_width - 24);
+
+        lv_obj_set_width(low_battery_popup_, w * 0.55);
+        lv_obj_align(low_battery_popup_, LV_ALIGN_BOTTOM_MID, 0, -55);
     }
 };
 

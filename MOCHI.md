@@ -14,6 +14,13 @@ seconde) en oppakken (eerst 10 s stil, dan rustige beweging). Als het apparaat
 niets doet, gaat dat via de wekwoordroute naar de server als
 `[Mochi wordt door elkaar geschud]` of `[Mochi wordt opgepakt]`.
 
+## Rond scherm
+
+Het 466 px scherm is rond. `CustomLcdDisplay::FitRoundScreen()` zet de
+pictogrammen en statusregel in het midden van de smalle bovenkant en toont de
+chattekst meerregelig (`CONFIG_USE_MULTILINE_CHAT_MESSAGE`) in een smaller,
+verhoogd vak onderin, zodat niets buiten de cirkel valt.
+
 ## Bouwen en flashen (ESP-IDF release/v6.1)
 
 ```

@@ -6,6 +6,14 @@ haalt zijn serverconfiguratie op bij een eigen xiaozhi-server op het thuisnetwer
 (`CONFIG_OTA_URL`) in plaats van bij xiaozhi.me. Zie de serverfork
 `brinkdev83/xiaozhi-esp32-server` (branch `mochi`, `MOCHI.md`).
 
+## Bewegingen
+
+`main/boards/waveshare/esp32-s3-touch-amoled-1.75/motion_detector.h` leest de
+QMI8658 (50 Hz) en herkent schudden (meerdere harde schokken binnen een
+seconde) en oppakken (eerst 10 s stil, dan rustige beweging). Als het apparaat
+niets doet, gaat dat via de wekwoordroute naar de server als
+`[Mochi wordt door elkaar geschud]` of `[Mochi wordt opgepakt]`.
+
 ## Bouwen en flashen (ESP-IDF release/v6.1)
 
 ```

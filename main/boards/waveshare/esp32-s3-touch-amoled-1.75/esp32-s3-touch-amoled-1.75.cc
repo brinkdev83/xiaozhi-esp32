@@ -18,6 +18,7 @@
 #include <driver/spi_master.h>
 #include "esp_io_expander_tca9554.h"
 #include "settings.h"
+#include "motion_detector.h"
 
 #include <esp_lcd_touch_cst9217.h>
 #include <esp_lvgl_port.h>
@@ -150,6 +151,7 @@ private:
     CustomBacklight* backlight_;
     esp_io_expander_handle_t io_expander = NULL;
     PowerSaveTimer* power_save_timer_;
+    MotionDetector* motion_detector_ = nullptr;
 
     void InitializePowerSaveTimer() {
         power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
@@ -323,6 +325,7 @@ public:
         InitializeTouch();
         InitializeButtons();
         InitializeTools();
+        motion_detector_ = new MotionDetector(i2c_bus_);
     }
 
     virtual AudioCodec* GetAudioCodec() override {

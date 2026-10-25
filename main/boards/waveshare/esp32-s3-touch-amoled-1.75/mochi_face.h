@@ -239,6 +239,7 @@ private:
     bool dirty_ = false;
     MochiStatus status_;
     uint32_t next_blink_ = 3000;
+    uint32_t frame_ = 0;
 
     static void Plain(lv_obj_t* obj) {
         lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
@@ -268,7 +269,14 @@ private:
     }
 
     static void TimerCallback(lv_timer_t* timer) {
-        static_cast<MochiFace*>(lv_timer_get_user_data(timer))->Render();
+        auto* self = static_cast<MochiFace*>(lv_timer_get_user_data(timer));
+        // While listening the microphone audio gets priority: animate at about
+        // 7 fps instead of 20, so no recorded speech frames are dropped.
+        if (Application::GetInstance().GetDeviceState() == kDeviceStateListening &&
+            ++self->frame_ % 3 != 0) {
+            return;
+        }
+        self->Render();
     }
 
     // A rectangle with rounded corners (or a circle with radius LV_RADIUS_CIRCLE).

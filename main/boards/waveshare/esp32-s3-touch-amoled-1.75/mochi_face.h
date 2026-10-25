@@ -55,6 +55,9 @@ public:
             bars_[i] = arc;
         }
 
+        BuildOutside();
+        BuildInside();
+
         antenna_ = Shape(root_, 0xF0A0B4);
         antenna_ball_ = Shape(root_, 0xFF80A0);
 
@@ -102,6 +105,14 @@ public:
         bubble_label_ = lv_label_create(bubble_);
         lv_obj_set_style_text_color(bubble_label_, lv_color_hex(0x322038), 0);
         lv_obj_center(bubble_label_);
+
+        // Debug: log every touch press and the object that receives it.
+        for (lv_indev_t* indev = lv_indev_get_next(nullptr); indev != nullptr;
+             indev = lv_indev_get_next(indev)) {
+            if (lv_indev_get_type(indev) == LV_INDEV_TYPE_POINTER) {
+                lv_indev_add_event_cb(indev, &MochiFace::OnIndevPressed, LV_EVENT_PRESSED, this);
+            }
+        }
 
         timer_ = lv_timer_create(&MochiFace::TimerCallback, 50, this);
         Render();
@@ -151,6 +162,19 @@ private:
     lv_obj_t* bubble_dots_[2] = {};
     lv_timer_t* timer_ = nullptr;
 
+    // Scenes: outside with a little house; inside with four rooms.
+    enum Room { kBedroom = 0, kKitchen, kBathroom, kLivingRoom };
+    static constexpr int kRoomX[4] = {-85, 85, -85, 85};
+    static constexpr int kRoomY[4] = {-60, -60, 95, 95};
+    static constexpr const char* kRoomName[4] = {"de slaapkamer", "de keuken", "de badkamer", "de woonkamer"};
+    static constexpr uint32_t kIdleOutsideMs = 90000;
+    lv_obj_t* outside_ = nullptr;
+    lv_obj_t* inside_ = nullptr;
+    bool inside_view_ = false;
+    uint32_t last_tap_ = 0;
+    float x_ = 0, y_ = -10;          // Mochi's centre (animated)
+    float target_x_ = 0, target_y_ = -10;
+
     std::string stage_ = "baby";
     std::string mood_ = "gewoon";
     std::string emotion_;
@@ -188,6 +212,147 @@ private:
         static_cast<MochiFace*>(lv_timer_get_user_data(timer))->Render();
     }
 
+    // A rectangle with rounded corners (or a circle with radius LV_RADIUS_CIRCLE).
+    static lv_obj_t* Box(lv_obj_t* parent, int w, int h, int x, int y, uint32_t color,
+                         int radius = 6) {
+        lv_obj_t* obj = Shape(parent, color);
+        lv_obj_set_style_radius(obj, radius, 0);
+        lv_obj_set_size(obj, w, h);
+        lv_obj_align(obj, LV_ALIGN_CENTER, x, y);
+        return obj;
+    }
+
+    static lv_obj_t* Layer(lv_obj_t* parent) {
+        lv_obj_t* obj = lv_obj_create(parent);
+        Plain(obj);
+        lv_obj_set_size(obj, LV_HOR_RES, LV_VER_RES);
+        lv_obj_center(obj);
+        lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, 0);
+        return obj;
+    }
+
+    static void Clickable(lv_obj_t* obj, lv_event_cb_t cb, void* self) {
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(obj, cb, LV_EVENT_CLICKED, self);
+    }
+
+    // Outside: a green hill and a little house bottom-left (tap to go in).
+    void BuildOutside() {
+        outside_ = Layer(root_);
+        Box(outside_, 440, 150, 0, 165, 0x2E6B3F, LV_RADIUS_CIRCLE);
+
+        lv_obj_t* house = lv_obj_create(outside_);
+        Plain(house);
+        lv_obj_set_size(house, 96, 104);
+        lv_obj_align(house, LV_ALIGN_CENTER, -135, 82);
+        lv_obj_set_style_bg_opa(house, LV_OPA_TRANSP, 0);
+        lv_obj_add_flag(house, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+        Clickable(house, &MochiFace::OnHouseClicked, this);
+
+        // Roof: a square turned 45 degrees, its lower half hidden behind the walls.
+        lv_obj_t* roof = Box(house, 56, 56, 0, -20, 0xC0392B, 4);
+        lv_obj_set_style_transform_pivot_x(roof, 28, 0);
+        lv_obj_set_style_transform_pivot_y(roof, 28, 0);
+        lv_obj_set_style_transform_rotation(roof, 450, 0);
+        Box(house, 12, 22, 22, -34, 0x8E5B3E, 2);           // chimney
+        Box(house, 70, 52, 0, 24, 0xF5E6C8, 4);             // walls
+        Box(house, 20, 32, -14, 34, 0x8E5B3E, 4);           // door
+        Box(house, 4, 4, -9, 36, 0xFFD93D, LV_RADIUS_CIRCLE);  // door knob
+        Box(house, 20, 18, 16, 18, 0x6FD3FF, 3);            // window
+    }
+
+    // Inside: bedroom, kitchen, bathroom and living room, plus a door outside.
+    void BuildInside() {
+        inside_ = Layer(root_);
+        static const uint32_t kWall[4] = {0x5B4B8A, 0x3E7C59, 0x2F6E8E, 0x8E5B3E};
+        static const char* const kLabel[4] = {"Slapen", "Eten", "Bad", "TV"};
+        for (int i = 0; i < 4; i++) {
+            lv_obj_t* room = Box(inside_, 150, 140, kRoomX[i], kRoomY[i] - 10, kWall[i], 24);
+            lv_obj_set_user_data(room, reinterpret_cast<void*>(static_cast<intptr_t>(i)));
+            Clickable(room, &MochiFace::OnRoomClicked, this);
+            lv_obj_t* label = lv_label_create(room);
+            lv_label_set_text_static(label, kLabel[i]);
+            lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
+            lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 8);
+        }
+        lv_obj_t* bed = lv_obj_get_child(inside_, kBedroom);
+        Box(bed, 104, 34, 0, 40, 0x8B5A2B);                  // bed frame
+        Box(bed, 72, 24, 10, 32, 0x7FB3FF);                  // blanket
+        Box(bed, 26, 16, -36, 30, 0xFFFFFF, LV_RADIUS_CIRCLE);  // pillow
+
+        lv_obj_t* kitchen = lv_obj_get_child(inside_, kKitchen);
+        Box(kitchen, 34, 70, -40, 24, 0xDDE6EA);             // fridge
+        Box(kitchen, 56, 34, 22, 42, 0x555555);              // stove
+        Box(kitchen, 16, 16, 12, 34, 0xE74C3C, LV_RADIUS_CIRCLE);  // hot plate
+        Box(kitchen, 16, 16, 34, 34, 0x888888, LV_RADIUS_CIRCLE);
+
+        lv_obj_t* bath = lv_obj_get_child(inside_, kBathroom);
+        Box(bath, 100, 38, 0, 40, 0xFFFFFF, 18);             // tub
+        Box(bath, 84, 12, 0, 30, 0x6FD3FF, 6);               // water
+        Box(bath, 14, 14, -20, 16, 0xE8F8FF, LV_RADIUS_CIRCLE);  // bubbles
+        Box(bath, 10, 10, 2, 10, 0xE8F8FF, LV_RADIUS_CIRCLE);
+        Box(bath, 12, 12, 22, 18, 0xE8F8FF, LV_RADIUS_CIRCLE);
+
+        lv_obj_t* living = lv_obj_get_child(inside_, kLivingRoom);
+        Box(living, 64, 42, 0, 0, 0x222222);                 // tv
+        Box(living, 54, 32, 0, 0, 0x6FD3FF, 3);              // screen
+        Box(living, 104, 22, 0, 48, 0xC0392B, 10);           // couch seat
+        Box(living, 104, 16, 0, 32, 0xA93226, 8);            // couch back
+
+        lv_obj_t* door = Box(inside_, 44, 56, 0, 178, 0x8E5B3E, 8);
+        Box(door, 6, 6, 12, 2, 0xFFD93D, LV_RADIUS_CIRCLE);
+        Clickable(door, &MochiFace::OnDoorClicked, this);
+
+        Show(inside_, false);
+    }
+
+    static void OnIndevPressed(lv_event_t* e) {
+        auto* indev = static_cast<lv_indev_t*>(lv_event_get_target(e));
+        lv_point_t point;
+        lv_indev_get_point(indev, &point);
+        lv_obj_t* target = lv_indev_get_active_obj();
+        ESP_LOGI("MochiFace", "touch at %d,%d -> obj %p (root %p)", static_cast<int>(point.x),
+                 static_cast<int>(point.y), target,
+                 static_cast<MochiFace*>(lv_event_get_user_data(e))->root_);
+    }
+
+    static void OnHouseClicked(lv_event_t* e) {
+        ESP_LOGI("MochiFace", "house clicked");
+        static_cast<MochiFace*>(lv_event_get_user_data(e))->SetInside(true);
+    }
+
+    static void OnDoorClicked(lv_event_t* e) {
+        ESP_LOGI("MochiFace", "door clicked");
+        static_cast<MochiFace*>(lv_event_get_user_data(e))->SetInside(false);
+    }
+
+    static void OnRoomClicked(lv_event_t* e) {
+        auto* self = static_cast<MochiFace*>(lv_event_get_user_data(e));
+        auto* room = static_cast<lv_obj_t*>(lv_event_get_current_target(e));
+        ESP_LOGI("MochiFace", "room clicked");
+        self->GoToRoom(static_cast<int>(reinterpret_cast<intptr_t>(lv_obj_get_user_data(room))));
+    }
+
+    void SetInside(bool inside) {
+        inside_view_ = inside;
+        last_tap_ = lv_tick_get();
+        Show(inside_, inside);
+        Show(outside_, !inside);
+        target_x_ = 0;
+        target_y_ = inside ? 10 : -10;
+    }
+
+    // Walk to a room and let Mochi (via the server) do what belongs there.
+    void GoToRoom(int room) {
+        last_tap_ = lv_tick_get();
+        target_x_ = kRoomX[room];
+        target_y_ = kRoomY[room];
+        if (stage_ != "ei") {
+            Application::GetInstance().SendTextEvent(
+                std::string("[In huis: de gebruiker brengt Mochi naar ") + kRoomName[room] + "]");
+        }
+    }
+
     Look CurrentLook(uint32_t now) const {
         if (asleep_ || stage_ == "ei") {
             return Look::Sleepy;
@@ -215,23 +380,39 @@ private:
     void Render() {
         const uint32_t now = lv_tick_get();
         const bool egg = stage_ == "ei";
-        const int size = egg ? 150 : stage_ == "baby" ? 150 : stage_ == "kind" ? 185 : 215;
         const auto state = Application::GetInstance().GetDeviceState();
         const bool speaking = state == kDeviceStateSpeaking;
         const bool listening = state == kDeviceStateListening;
         const Look look = CurrentLook(now);
 
+        // Back outside after a while without taps or talking.
+        if (inside_view_ && state == kDeviceStateIdle && now - last_tap_ > kIdleOutsideMs) {
+            SetInside(false);
+        }
+        // Asleep inside: off to bed.
+        if (inside_view_ && asleep_) {
+            target_x_ = kRoomX[kBedroom];
+            target_y_ = kRoomY[kBedroom];
+        }
+        // Walk (ease) toward the target; smaller inside so the rooms fit.
+        x_ += (target_x_ - x_) * 0.12f;
+        y_ += (target_y_ - y_) * 0.12f;
+        const bool walking = std::fabs(target_x_ - x_) + std::fabs(target_y_ - y_) > 4;
+        const int full = egg ? 150 : stage_ == "baby" ? 150 : stage_ == "kind" ? 185 : 215;
+        const int size = inside_view_ ? full * 45 / 100 : full;
+
         // Body: breathing bob (an egg wobbles instead), a hop when happy.
         float t = now / 1000.0f;
         int dy = static_cast<int>(4 * std::sin(t * 2.6f));
         int dx = egg ? static_cast<int>(5 * std::sin(t * 1.7f)) : 0;
-        if (look == Look::Happy && !egg) {
-            dy -= static_cast<int>(10 * std::fabs(std::sin(t * 5.0f)));
+        if ((look == Look::Happy || walking) && !egg) {
+            dy -= static_cast<int>(size / 15 * std::fabs(std::sin(t * (walking ? 9.0f : 5.0f))));
         }
         const int w = size;
         const int h = egg ? size * 6 / 5 : size;
         lv_obj_set_size(body_, w, h);
-        lv_obj_align(body_, LV_ALIGN_CENTER, dx, -10 + dy);
+        lv_obj_set_style_border_width(body_, inside_view_ ? 3 : 6, 0);
+        lv_obj_align(body_, LV_ALIGN_CENTER, static_cast<int>(x_) + dx, static_cast<int>(y_) + dy);
         lv_obj_set_style_bg_color(body_, lv_color_hex(egg ? 0xFFF1D0 : kBodyColor), 0);
         lv_obj_set_style_border_color(body_, lv_color_hex(egg ? 0xE8D5A8 : 0xF0A0B4), 0);
 
@@ -241,9 +422,9 @@ private:
         Show(antenna_ball_, antenna);
         if (antenna) {
             int sway = static_cast<int>(6 * std::sin(t * 1.8f));
-            lv_obj_set_size(antenna_, 6, size / 5);
+            lv_obj_set_size(antenna_, inside_view_ ? 3 : 6, size / 5);
             lv_obj_align_to(antenna_, body_, LV_ALIGN_OUT_TOP_MID, sway / 2, 6);
-            lv_obj_set_size(antenna_ball_, 20, 20);
+            lv_obj_set_size(antenna_ball_, size / 8, size / 8);
             lv_obj_align_to(antenna_ball_, antenna_, LV_ALIGN_OUT_TOP_MID, sway / 2, 4);
             lv_obj_set_style_bg_color(antenna_ball_, lv_color_hex(listening ? 0xFFD93D : 0xFF80A0), 0);
         }
@@ -289,6 +470,7 @@ private:
         Show(mouth_open_, open);
         Show(mouth_arc_, !egg && !open);
         int mouth = size * 24 / 100;
+        lv_obj_set_style_arc_width(mouth_arc_, inside_view_ ? 3 : 5, LV_PART_MAIN);
         if (open) {
             lv_obj_set_size(mouth_open_, mouth * 6 / 10, mouth / 2);
             lv_obj_align(mouth_open_, LV_ALIGN_CENTER, 0, size * 15 / 100);
@@ -318,7 +500,7 @@ private:
         for (int i = 0; i < 4; i++) {
             if (mood_ == kNeedMood[i]) need = i;
         }
-        bool bubble = need >= 0 && !egg && !asleep_;
+        bool bubble = need >= 0 && !egg && !asleep_ && !inside_view_;
         Show(bubble_, bubble);
         for (auto* dot : bubble_dots_) Show(dot, bubble);
         if (bubble) {

@@ -1378,6 +1378,20 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     }
 }
 
+void Application::SendTextEvent(const std::string& text) {
+    auto state = GetDeviceState();
+    if (state == kDeviceStateIdle) {
+        WakeWordInvoke(text);
+    } else if (state == kDeviceStateListening) {
+        Schedule([this, text]() {
+            if (protocol_ && protocol_->IsAudioChannelOpened() &&
+                GetDeviceState() == kDeviceStateListening) {
+                protocol_->SendWakeWordDetected(text);
+            }
+        });
+    }
+}
+
 bool Application::CanEnterSleepMode() {
     if (GetDeviceState() != kDeviceStateIdle) {
         return false;

@@ -165,6 +165,11 @@ private:
         lv_obj_set_width(status_label_, w * 0.4);
         lv_obj_set_width(notification_label_, w * 0.4);
 
+        // Overlays must not swallow taps meant for the house and rooms below.
+        lv_obj_remove_flag(top_bar_, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_remove_flag(bottom_bar_, LV_OBJ_FLAG_CLICKABLE);
+
         // Bottom: chat text in a narrower, raised, rounded box.
         const int chat_width = w * 0.6;
         lv_obj_set_width(bottom_bar_, chat_width);

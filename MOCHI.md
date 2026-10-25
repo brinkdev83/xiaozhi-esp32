@@ -27,8 +27,10 @@ verhoogd vak onderin, zodat niets buiten de cirkel valt.
 knipperen, mond bewegen tijdens praten, sprietje geel tijdens luisteren, zzz
 tijdens slapen en vlekjes als hij vies is. Het uiterlijk volgt de groeifase
 (ei, baby, kind, volwassen) en de uitdrukking volgt Claude's emoji of anders
-de stemming. Vier boogjes langs de bovenrand tonen de behoeften: oranje eten,
-geel energie, roze plezier, blauw schoon.
+de stemming. Vier boogjes aan de zijkanten tonen de behoeften: links oranje
+eten en geel energie, rechts roze plezier en blauw schoon. Is een behoefte laag,
+dan knippert dat boogje en verschijnt er een denkwolkje ("Honger!",
+"Slaap...", "Spelen?", "Badje!").
 
 `MochiStatePoller` haalt elke 30 s `/mochi/state` op bij de server van de
 OTA-URL. Wil Mochi aandacht en is het bord idle, dan start hij zelf een

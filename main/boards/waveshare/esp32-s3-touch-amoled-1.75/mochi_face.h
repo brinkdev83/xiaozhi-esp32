@@ -32,9 +32,10 @@ public:
         lv_obj_set_style_bg_opa(root_, LV_OPA_TRANSP, 0);
         lv_obj_move_to_index(root_, 1);  // index 0 is the opaque background container
 
-        // Need bars: four arcs along the top edge (angles: 0 = 3 o'clock, clockwise).
-        static const uint32_t kBarColors[4] = {0xFF9F43, 0xFFD93D, 0xFF6B9D, 0x4FC3F7};
-        static const int kBarStart[4] = {200, 235, 273, 308};
+        // Need bars: two arcs on each side, clear of the icons at the top and the
+        // chat text at the bottom (angles: 0 = 3 o'clock, clockwise).
+        // Left: eten, energie; right: plezier, schoon.
+        static const int kBarStart[4] = {142, 178, 330, 6};
         for (int i = 0; i < 4; i++) {
             lv_obj_t* arc = lv_arc_create(root_);
             lv_obj_set_size(arc, LV_HOR_RES - 8, LV_VER_RES - 8);
@@ -42,13 +43,13 @@ public:
             lv_obj_remove_style(arc, nullptr, LV_PART_KNOB);
             lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
             lv_arc_set_rotation(arc, 0);
-            lv_arc_set_bg_angles(arc, kBarStart[i], kBarStart[i] + 32);
+            lv_arc_set_bg_angles(arc, kBarStart[i], (kBarStart[i] + 32) % 360);
             lv_arc_set_range(arc, 0, 100);
             lv_arc_set_value(arc, 80);
             lv_obj_set_style_arc_width(arc, 8, LV_PART_MAIN);
             lv_obj_set_style_arc_width(arc, 8, LV_PART_INDICATOR);
             lv_obj_set_style_arc_color(arc, lv_color_hex(0x2A2230), LV_PART_MAIN);
-            lv_obj_set_style_arc_color(arc, lv_color_hex(kBarColors[i]), LV_PART_INDICATOR);
+            lv_obj_set_style_arc_color(arc, lv_color_hex(kNeedColors[i]), LV_PART_INDICATOR);
             lv_obj_set_style_arc_rounded(arc, true, LV_PART_MAIN);
             lv_obj_set_style_arc_rounded(arc, true, LV_PART_INDICATOR);
             bars_[i] = arc;
@@ -86,6 +87,22 @@ public:
         lv_label_set_text(zzz_, "z Z z");
         lv_obj_set_style_text_color(zzz_, lv_color_hex(0xB8B0FF), 0);
 
+        // Thought bubble with the most urgent need, top-right of Mochi.
+        for (int i = 0; i < 2; i++) {
+            bubble_dots_[i] = Shape(root_, 0xFFFFFF);
+        }
+        bubble_ = lv_obj_create(root_);
+        Plain(bubble_);
+        lv_obj_set_size(bubble_, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_style_radius(bubble_, 18, 0);
+        lv_obj_set_style_bg_opa(bubble_, LV_OPA_COVER, 0);
+        lv_obj_set_style_pad_hor(bubble_, 12, 0);
+        lv_obj_set_style_pad_ver(bubble_, 6, 0);
+        lv_obj_align(bubble_, LV_ALIGN_CENTER, 135, -125);
+        bubble_label_ = lv_label_create(bubble_);
+        lv_obj_set_style_text_color(bubble_label_, lv_color_hex(0x322038), 0);
+        lv_obj_center(bubble_label_);
+
         timer_ = lv_timer_create(&MochiFace::TimerCallback, 50, this);
         Render();
     }
@@ -112,6 +129,10 @@ public:
 private:
     enum class Look { Normal, Happy, Sad, Sleepy, Surprised };
     static constexpr uint32_t kBodyColor = 0xFFC4CE;
+    // eten, energie, plezier, schoon (same order as the server's needs)
+    static constexpr uint32_t kNeedColors[4] = {0xFF9F43, 0xFFD93D, 0xFF6B9D, 0x4FC3F7};
+    static constexpr const char* kNeedMood[4] = {"honger", "moe", "verveling", "vies"};
+    static constexpr const char* kNeedText[4] = {"Honger!", "Slaap...", "Spelen?", "Badje!"};
 
     lv_obj_t* root_ = nullptr;
     lv_obj_t* bars_[4] = {};
@@ -125,6 +146,9 @@ private:
     lv_obj_t* mouth_arc_ = nullptr;
     lv_obj_t* mouth_open_ = nullptr;
     lv_obj_t* zzz_ = nullptr;
+    lv_obj_t* bubble_ = nullptr;
+    lv_obj_t* bubble_label_ = nullptr;
+    lv_obj_t* bubble_dots_[2] = {};
     lv_timer_t* timer_ = nullptr;
 
     std::string stage_ = "baby";
@@ -289,8 +313,36 @@ private:
             lv_obj_align_to(zzz_, body_, LV_ALIGN_OUT_TOP_RIGHT, 10, 10 - float_y);
         }
 
-        // Bars mean nothing for an egg.
-        for (auto* bar : bars_) Show(bar, !egg);
+        // The most urgent need: a thought bubble and its bar blinking.
+        int need = -1;
+        for (int i = 0; i < 4; i++) {
+            if (mood_ == kNeedMood[i]) need = i;
+        }
+        bool bubble = need >= 0 && !egg && !asleep_;
+        Show(bubble_, bubble);
+        for (auto* dot : bubble_dots_) Show(dot, bubble);
+        if (bubble) {
+            lv_label_set_text_static(bubble_label_, kNeedText[need]);
+            lv_obj_set_style_bg_color(bubble_, lv_color_hex(kNeedColors[need]), 0);
+            int pop = static_cast<int>(3 * std::sin(t * 4.0f));
+            lv_obj_align(bubble_, LV_ALIGN_CENTER, 135, -125 + pop);
+            // Dots from Mochi's head (up-right, at 45 degrees) toward the bubble.
+            const int near = (size / 2 + 10) * 707 / 1000;
+            const int far = (size / 2 + 32) * 707 / 1000;
+            lv_obj_set_size(bubble_dots_[0], 10, 10);
+            lv_obj_align(bubble_dots_[0], LV_ALIGN_CENTER, near, -10 - near);
+            lv_obj_set_size(bubble_dots_[1], 16, 16);
+            lv_obj_align(bubble_dots_[1], LV_ALIGN_CENTER, far, -10 - far);
+            for (auto* dot : bubble_dots_) {
+                lv_obj_set_style_bg_color(dot, lv_color_hex(kNeedColors[need]), 0);
+            }
+        }
+        bool blink_on = (now / 500) % 2 == 0;
+        for (int i = 0; i < 4; i++) {
+            Show(bars_[i], !egg);  // bars mean nothing for an egg
+            lv_opa_t opa = (bubble && i == need && !blink_on) ? LV_OPA_30 : LV_OPA_COVER;
+            lv_obj_set_style_arc_opa(bars_[i], opa, LV_PART_INDICATOR);
+        }
     }
 };
 

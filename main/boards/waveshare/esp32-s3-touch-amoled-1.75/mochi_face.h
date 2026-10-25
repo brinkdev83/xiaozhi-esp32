@@ -157,6 +157,19 @@ public:
     }
 
     const MochiStatus& status() const { return status_; }
+
+    // Voice command (MCP tool self.mochi.ga_naar): go to a room or piece of
+    // furniture, entering the house first if needed.
+    bool GoToPlace(const std::string& place) {
+        if (place == "buiten") {
+            if (inside_view_) SetInside(false);
+            return true;
+        }
+        if (!inside_view_) {
+            SetInside(true);
+        }
+        return house_.GoToPlace(place);
+    }
     void SetName(const std::string& name) { status_.name = name; }
 
 private:
@@ -264,7 +277,10 @@ private:
         lv_obj_t* house = lv_obj_create(outside_);
         Plain(house);
         lv_obj_set_size(house, 96, 104);
-        lv_obj_align(house, LV_ALIGN_CENTER, -135, 82);
+        lv_obj_align(house, LV_ALIGN_CENTER, -128, 72);
+        lv_obj_set_style_transform_pivot_x(house, 48, 0);
+        lv_obj_set_style_transform_pivot_y(house, 104, 0);
+        lv_obj_set_style_transform_scale(house, 384, 0);  // 1.5x (256 = 1x)
         lv_obj_set_style_bg_opa(house, LV_OPA_TRANSP, 0);
         lv_obj_add_flag(house, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
         Clickable(house, &MochiFace::OnHouseClicked, this);
@@ -279,6 +295,12 @@ private:
         Box(house, 20, 32, -14, 34, 0x8E5B3E, 4);           // door
         Box(house, 4, 4, -9, 36, 0xFFD93D, LV_RADIUS_CIRCLE);  // door knob
         Box(house, 20, 18, 16, 18, 0x6FD3FF, 3);            // window
+        Box(house, 2, 18, 16, 18, 0xF5E6C8, 0);             // window cross
+        Box(house, 20, 2, 16, 18, 0xF5E6C8, 0);
+        Box(house, 26, 6, 16, 30, 0x8E5B3E, 2);             // flower box
+        Box(house, 5, 5, 9, 26, 0xFF6B9D, LV_RADIUS_CIRCLE);
+        Box(house, 5, 5, 17, 26, 0xFFD93D, LV_RADIUS_CIRCLE);
+        Box(house, 5, 5, 24, 26, 0xFF6B9D, LV_RADIUS_CIRCLE);
     }
 
     static void OnIndevPressed(lv_event_t* e) {
@@ -345,7 +367,7 @@ private:
         // In the house, MochiHouse decides where Mochi goes and what he does.
         auto pose = MochiHouse::Pose::Stand;
         if (inside_view_) {
-            house_.Tick(now, stage_, mood_, asleep_, x_, y_);
+            house_.Tick(now, stage_, asleep_, x_, y_);
             if (house_.wants_outside()) {
                 SetInside(false);
             } else {
@@ -370,7 +392,7 @@ private:
         }
         const bool walking = distance > 1.0f;
         const int full = egg ? 150 : stage_ == "baby" ? 150 : stage_ == "kind" ? 185 : 215;
-        const int size = inside_view_ ? full * 55 / 100 : full;
+        const int size = inside_view_ ? full * 65 / 100 : full;
 
         // Body: breathing bob (an egg wobbles instead), a hop when happy.
         float t = now / 1000.0f;

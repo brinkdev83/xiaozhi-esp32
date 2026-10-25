@@ -135,6 +135,13 @@ public:
         state_poller_ = new MochiStatePoller(face_, this);
     }
 
+    // Voice command from Claude: send Mochi to a room or piece of furniture.
+    bool MochiGoTo(const std::string& place) {
+        if (face_ == nullptr) return false;
+        DisplayLockGuard lock(this);
+        return face_->GoToPlace(place);
+    }
+
     virtual bool SetEmotion(const char* emotion) override {
         if (face_ == nullptr) {
             return SpiLcdDisplay::SetEmotion(emotion);
@@ -365,6 +372,15 @@ private:
     // 初始化工具
     void InitializeTools() {
         auto &mcp_server = McpServer::GetInstance();
+        mcp_server.AddTool("self.mochi.ga_naar",
+            "Laat Mochi op het scherm naar een plek in zijn huis gaan en daar iets doen. "
+            "Gebruik dit wanneer de gebruiker zegt dat Mochi ergens heen moet of iets moet doen "
+            "in huis. plek is een van: woonkamer, keuken, badkamer, slaapkamer, tv, bank, bal, "
+            "speelgoed, koelkast, fornuis, tafel, eten, bad, wastafel, bed, buiten.",
+            PropertyList({Property("plek", kPropertyTypeString)}),
+            [this](const PropertyList& properties) -> ReturnValue {
+                return display_->MochiGoTo(properties["plek"].value<std::string>());
+            });
         mcp_server.AddTool("self.system.reconfigure_wifi",
             "End this conversation and enter WiFi configuration mode.\n"
             "**CAUTION** You must ask the user to confirm this action.",

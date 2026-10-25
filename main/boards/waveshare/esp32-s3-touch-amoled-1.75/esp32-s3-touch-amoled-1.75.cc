@@ -19,6 +19,7 @@
 #include "esp_io_expander_tca9554.h"
 #include "settings.h"
 #include "motion_detector.h"
+#include "mochi_face.h"
 
 #include <esp_lcd_touch_cst9217.h>
 #include <esp_lvgl_port.h>
@@ -115,13 +116,37 @@ public:
     virtual void SetupUI() override {
         // Call parent SetupUI() first to create all lvgl objects
         SpiLcdDisplay::SetupUI();
+        if (face_ != nullptr) {
+            return;  // already set up
+        }
 
-        DisplayLockGuard lock(this);
-        FitRoundScreen();
-        lv_display_add_event_cb(display_, rounder_event_cb, LV_EVENT_INVALIDATE_AREA, NULL);
+        {
+            DisplayLockGuard lock(this);
+            FitRoundScreen();
+            // Mochi replaces the emoji in the middle of the screen.
+            if (emoji_box_ != nullptr) {
+                lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+            }
+            face_ = new MochiFace(lv_screen_active());
+            lv_display_add_event_cb(display_, rounder_event_cb, LV_EVENT_INVALIDATE_AREA, NULL);
+        }
+        state_poller_ = new MochiStatePoller(face_, this);
     }
 
+    virtual bool SetEmotion(const char* emotion) override {
+        if (face_ == nullptr) {
+            return SpiLcdDisplay::SetEmotion(emotion);
+        }
+        DisplayLockGuard lock(this);
+        face_->SetEmotion(emotion);
+        return true;
+    }
+
+
 private:
+    MochiFace* face_ = nullptr;
+    MochiStatePoller* state_poller_ = nullptr;
+
     // Mochi: the panel is a 466 px circle, so keep everything inside it. The
     // circle is ~190 px wide 25 px below the top and ~290 px wide 50 px above
     // the bottom; the sizes below follow from that.

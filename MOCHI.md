@@ -21,6 +21,19 @@ pictogrammen en statusregel in het midden van de smalle bovenkant en toont de
 chattekst meerregelig (`CONFIG_USE_MULTILINE_CHAT_MESSAGE`) in een smaller,
 verhoogd vak onderin, zodat niets buiten de cirkel valt.
 
+## Mochi op het scherm
+
+`mochi_face.h` tekent Mochi met LVGL-vormen in plaats van de emoji: ademen,
+knipperen, mond bewegen tijdens praten, sprietje geel tijdens luisteren, zzz
+tijdens slapen en vlekjes als hij vies is. Het uiterlijk volgt de groeifase
+(ei, baby, kind, volwassen) en de uitdrukking volgt Claude's emoji of anders
+de stemming. Vier boogjes langs de bovenrand tonen de behoeften: oranje eten,
+geel energie, roze plezier, blauw schoon.
+
+`MochiStatePoller` haalt elke 30 s `/mochi/state` op bij de server van de
+OTA-URL. Wil Mochi aandacht en is het bord idle, dan start hij zelf een
+gesprek met `[Mochi wil aandacht: ...]`.
+
 ## Bouwen en flashen (ESP-IDF release/v6.1)
 
 ```

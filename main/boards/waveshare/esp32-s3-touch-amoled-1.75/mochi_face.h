@@ -1,7 +1,7 @@
 #pragma once
 
 // Mochi: draws the pet itself (instead of an emoji) on the round 466 px screen,
-// with four need bars along the top edge, and polls the server's /mochi/state
+// with six need bars along the sides, and polls the server's /mochi/state
 // so the face follows the pet's stage and needs. When the pet wants attention
 // and the device is idle, it starts a conversation by itself.
 //
@@ -12,6 +12,7 @@
 #include "board.h"
 #include "display/display.h"
 #include "mochi_house.h"
+#include "mochi_park.h"
 
 #include <cJSON.h>
 #include <cmath>
@@ -30,7 +31,11 @@ struct MochiStatus {
     bool asleep = false;
     int age_days = 0;
     int bond = 0;
-    int needs[4] = {80, 80, 80, 80};  // eten, energie, plezier, schoon
+    // eten, energie, plezier, schoon, drinken, beweging, gezondheid
+    static constexpr int kNeeds = 7;
+    int needs[kNeeds] = {80, 80, 80, 80, 80, 70, 100};
+    int poop = 0;
+    bool sick = false;
 };
 
 // Base URL of the Mochi server: the host of the OTA URL.
@@ -51,11 +56,16 @@ public:
         lv_obj_set_style_bg_opa(root_, LV_OPA_TRANSP, 0);
         lv_obj_move_to_index(root_, 1);  // index 0 is the opaque background container
 
-        // Need bars: two arcs on each side, clear of the icons at the top and the
-        // chat text at the bottom (angles: 0 = 3 o'clock, clockwise).
-        // Left: eten, energie; right: plezier, schoon.
-        static const int kBarStart[4] = {142, 178, 330, 6};
-        for (int i = 0; i < 4; i++) {
+        BuildOutside();
+        house_.BuildBackground(root_);
+        park_.BuildBackground(root_);
+        BuildPoop();
+
+        // Need bars: three arcs on each side, clear of the icons at the top and
+        // the chat text at the bottom (angles: 0 = 3 o'clock, clockwise).
+        // Left: eten, drinken, energie; right: plezier, beweging, schoon.
+        static const int kBarStart[kBars] = {127, 163, 199, 305, 341, 17};
+        for (int i = 0; i < kBars; i++) {
             lv_obj_t* arc = lv_arc_create(root_);
             lv_obj_set_size(arc, LV_HOR_RES - 8, LV_VER_RES - 8);
             lv_obj_center(arc);
@@ -68,14 +78,11 @@ public:
             lv_obj_set_style_arc_width(arc, 8, LV_PART_MAIN);
             lv_obj_set_style_arc_width(arc, 8, LV_PART_INDICATOR);
             lv_obj_set_style_arc_color(arc, lv_color_hex(0x2A2230), LV_PART_MAIN);
-            lv_obj_set_style_arc_color(arc, lv_color_hex(kNeedColors[i]), LV_PART_INDICATOR);
+            lv_obj_set_style_arc_color(arc, lv_color_hex(kNeedColors[kBarNeed[i]]), LV_PART_INDICATOR);
             lv_obj_set_style_arc_rounded(arc, true, LV_PART_MAIN);
             lv_obj_set_style_arc_rounded(arc, true, LV_PART_INDICATOR);
             bars_[i] = arc;
         }
-
-        BuildOutside();
-        house_.BuildBackground(root_);
 
         antenna_ = Shape(root_, 0xF0A0B4);
         antenna_ball_ = Shape(root_, 0xFF80A0);
@@ -106,6 +113,7 @@ public:
         mouth_open_ = Shape(body_, 0x96284A);
 
         house_.BuildForeground(root_);  // tub front, duvet and props over Mochi
+        park_.BuildForeground(root_);
 
         zzz_ = lv_label_create(root_);
         lv_label_set_text(zzz_, "z Z z");
@@ -150,10 +158,11 @@ public:
         stage_ = status.stage;
         mood_ = status.mood;
         asleep_ = status.asleep;
-        for (int i = 0; i < 4; i++) {
-            lv_arc_set_value(bars_[i], status.needs[i]);
+        for (int i = 0; i < kBars; i++) {
+            lv_arc_set_value(bars_[i], status.needs[kBarNeed[i]]);
         }
         dirty_ = status.needs[3] < 35;
+        UpdatePoop();
     }
 
     const MochiStatus& status() const { return status_; }
@@ -162,12 +171,14 @@ public:
     // furniture, entering the house first if needed.
     bool GoToPlace(const std::string& place) {
         if (place == "buiten") {
-            if (inside_view_) SetInside(false);
+            SetScene(Scene::Outside);
             return true;
         }
-        if (!inside_view_) {
-            SetInside(true);
+        if (MochiPark::IsPlace(place)) {
+            if (scene_ != Scene::Park) SetScene(Scene::Park);
+            return park_.GoToPlace(place);
         }
+        if (scene_ != Scene::House) SetScene(Scene::House);
         return house_.GoToPlace(place);
     }
     void SetName(const std::string& name) { status_.name = name; }
@@ -175,14 +186,26 @@ public:
 private:
     enum class Look { Normal, Happy, Sad, Sleepy, Surprised };
     static constexpr uint32_t kBodyColor = 0xFFC4CE;
-    // eten, energie, plezier, schoon (same order as the server's needs)
-    static constexpr uint32_t kNeedColors[4] = {0xFF9F43, 0xFFD93D, 0xFF6B9D, 0x4FC3F7};
-    static constexpr const char* kNeedMood[4] = {"honger", "moe", "verveling", "vies"};
-    static constexpr const char* kNeedText[4] = {"Honger!", "Slaap...", "Spelen?", "Badje!"};
+    // Per need (MochiStatus order): bar colour.
+    static constexpr uint32_t kNeedColors[MochiStatus::kNeeds] = {
+        0xFF9F43, 0xFFD93D, 0xFF6B9D, 0x4FC3F7, 0x48C9B0, 0x58D68D, 0xA9DFBF};
+    static constexpr int kBars = 6;  // health has no bar; it shows as being ill
+    static constexpr int kBarNeed[kBars] = {0, 4, 1, 2, 5, 3};
+    // Mood from the server -> thought bubble text, colour and need (-1: none).
+    struct MoodBubble { const char* mood; const char* text; uint32_t color; int need; };
+    static constexpr MoodBubble kBubbles[] = {
+        {"honger", "Honger!", 0xFF9F43, 0},  {"dorst", "Dorst!", 0x48C9B0, 4},
+        {"moe", "Slaap...", 0xFFD93D, 1},    {"verveling", "Spelen?", 0xFF6B9D, 2},
+        {"bewegen", "Rennen!", 0x58D68D, 5}, {"vies", "Badje!", 0x4FC3F7, 3},
+        {"ziek", "Ziek...", 0xA9DFBF, 6},    {"poep", "Poep!", 0xC8A27A, -1},
+    };
+    static constexpr int kPoopSlots = 4;
 
     lv_obj_t* root_ = nullptr;
-    lv_obj_t* bars_[4] = {};
-    lv_opa_t bar_opa_[4] = {LV_OPA_COVER, LV_OPA_COVER, LV_OPA_COVER, LV_OPA_COVER};
+    lv_obj_t* bars_[kBars] = {};
+    lv_opa_t bar_opa_[kBars] = {LV_OPA_COVER, LV_OPA_COVER, LV_OPA_COVER,
+                                LV_OPA_COVER, LV_OPA_COVER, LV_OPA_COVER};
+    lv_obj_t* poops_[kPoopSlots] = {};
     lv_obj_t* body_ = nullptr;
     lv_obj_t* antenna_ = nullptr;
     lv_obj_t* antenna_ball_ = nullptr;
@@ -198,10 +221,13 @@ private:
     lv_obj_t* bubble_dots_[2] = {};
     lv_timer_t* timer_ = nullptr;
 
-    // Scenes: outside with a little house; inside, MochiHouse's rooms.
+    // Scenes: outside (with the little house and a signpost to the
+    // playground), MochiHouse's rooms, and MochiPark.
+    enum class Scene { Outside, House, Park };
     lv_obj_t* outside_ = nullptr;
     MochiHouse house_;
-    bool inside_view_ = false;
+    MochiPark park_;
+    Scene scene_ = Scene::Outside;
     float x_ = 0, y_ = -10;          // Mochi's centre (animated)
     float target_x_ = 0, target_y_ = -10;
 
@@ -301,6 +327,53 @@ private:
         Box(house, 5, 5, 9, 26, 0xFF6B9D, LV_RADIUS_CIRCLE);
         Box(house, 5, 5, 17, 26, 0xFFD93D, LV_RADIUS_CIRCLE);
         Box(house, 5, 5, 24, 26, 0xFF6B9D, LV_RADIUS_CIRCLE);
+
+        // Signpost to the playground (right).
+        Box(outside_, 8, 70, 160, 92, 0x8B5A2B, 2);
+        lv_obj_t* sign = Box(outside_, 104, 30, 150, 60, 0xA0522D, 6);
+        lv_obj_t* text = lv_label_create(sign);
+        lv_label_set_text_static(text, "Speeltuin >");
+        lv_obj_set_style_text_color(text, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_center(text);
+        lv_obj_set_ext_click_area(sign, 24);
+        Clickable(sign, &MochiFace::OnParkClicked, this);
+    }
+
+    // Poop: up to four little heaps on the floor; tap one to clean them up.
+    void BuildPoop() {
+        static const int kX[kPoopSlots] = {-115, 95, -55, 140};
+        for (int i = 0; i < kPoopSlots; i++) {
+            lv_obj_t* heap = lv_obj_create(root_);
+            Plain(heap);
+            lv_obj_set_size(heap, 34, 30);
+            lv_obj_set_style_bg_opa(heap, LV_OPA_TRANSP, 0);
+            lv_obj_align(heap, LV_ALIGN_CENTER, kX[i], 150);
+            Box(heap, 30, 12, 0, 8, 0x7B4A2A, LV_RADIUS_CIRCLE);
+            Box(heap, 20, 10, 0, -1, 0x8E5B3E, LV_RADIUS_CIRCLE);
+            Box(heap, 10, 8, 0, -9, 0x9C6B45, LV_RADIUS_CIRCLE);
+            lv_obj_set_ext_click_area(heap, 14);
+            Clickable(heap, &MochiFace::OnPoopClicked, this);
+            lv_obj_add_flag(heap, LV_OBJ_FLAG_HIDDEN);
+            poops_[i] = heap;
+        }
+    }
+
+    void UpdatePoop() {
+        int count = stage_ == "ei" ? 0 : status_.poop;
+        for (int i = 0; i < kPoopSlots; i++) {
+            Show(poops_[i], i < count);
+        }
+    }
+
+    static void OnPoopClicked(lv_event_t* e) {
+        auto* self = static_cast<MochiFace*>(lv_event_get_user_data(e));
+        Application::GetInstance().SendTextEvent("[Poep: de gebruiker ruimt Mochi's poep op]");
+        self->status_.poop = 0;  // the next poll brings the server's view
+        self->UpdatePoop();
+    }
+
+    static void OnParkClicked(lv_event_t* e) {
+        static_cast<MochiFace*>(lv_event_get_user_data(e))->SetScene(Scene::Park);
     }
 
     static void OnIndevPressed(lv_event_t* e) {
@@ -315,17 +388,23 @@ private:
 
     static void OnHouseClicked(lv_event_t* e) {
         ESP_LOGI("MochiFace", "house clicked");
-        static_cast<MochiFace*>(lv_event_get_user_data(e))->SetInside(true);
+        static_cast<MochiFace*>(lv_event_get_user_data(e))->SetScene(Scene::House);
     }
 
-    void SetInside(bool inside) {
-        inside_view_ = inside;
-        Show(outside_, !inside);
-        if (inside) {
+    void SetScene(Scene scene) {
+        Scene from = scene_;
+        if (scene == from) return;
+        if (from == Scene::House) house_.Leave();
+        if (from == Scene::Park) park_.Leave();
+        scene_ = scene;
+        Show(outside_, scene == Scene::Outside);
+        if (scene == Scene::House) {
             house_.Enter(x_, y_);
+        } else if (scene == Scene::Park) {
+            park_.Enter(x_, y_);
         } else {
-            house_.Leave();
-            x_ = -135;  // out through the front door of the little house
+            // Back outside: from the house's front door or along the path.
+            x_ = from == Scene::Park ? 160 : -135;
             y_ = 70;
             target_x_ = 0;
             target_y_ = -10;
@@ -352,7 +431,7 @@ private:
         }
         if (mood_ == "blij") return Look::Happy;
         if (mood_ == "moe") return Look::Sleepy;
-        if (mood_ == "honger" || mood_ == "verveling") return Look::Sad;
+        if (mood_ == "honger" || mood_ == "verveling" || mood_ == "ziek" || mood_ == "dorst") return Look::Sad;
         return Look::Normal;
     }
 
@@ -364,16 +443,29 @@ private:
         const bool listening = state == kDeviceStateListening;
         Look look = CurrentLook(now);
 
-        // In the house, MochiHouse decides where Mochi goes and what he does.
+        const bool in_scene = scene_ != Scene::Outside;
+        const int full = egg ? 150 : stage_ == "baby" ? 150 : stage_ == "kind" ? 185 : 215;
+        const int size = in_scene ? full * 65 / 100 : full;
+
+        // In the house or park, that scene decides where Mochi goes and what he does.
         auto pose = MochiHouse::Pose::Stand;
-        if (inside_view_) {
+        if (scene_ == Scene::House) {
             house_.Tick(now, stage_, asleep_, x_, y_);
             if (house_.wants_outside()) {
-                SetInside(false);
+                SetScene(Scene::Outside);
             } else {
                 target_x_ = house_.walk_x();
                 target_y_ = house_.walk_y();
                 pose = house_.pose();
+            }
+        } else if (scene_ == Scene::Park) {
+            park_.Tick(now, x_, y_, size);
+            if (park_.wants_home()) {
+                SetScene(Scene::Outside);
+            } else {
+                target_x_ = park_.walk_x();
+                target_y_ = park_.walk_y();
+                if (park_.sitting()) pose = MochiHouse::Pose::Sit;
             }
         }
         if (pose == MochiHouse::Pose::Lie) {
@@ -382,7 +474,7 @@ private:
         // Walk at a steady pace toward the target.
         const float to_x = target_x_ - x_, to_y = target_y_ - y_;
         const float distance = std::sqrt(to_x * to_x + to_y * to_y);
-        const float pace = inside_view_ ? 3.5f : 6.0f;
+        const float pace = in_scene ? 3.5f : 6.0f;
         if (distance <= pace) {
             x_ = target_x_;
             y_ = target_y_;
@@ -391,8 +483,6 @@ private:
             y_ += to_y / distance * pace;
         }
         const bool walking = distance > 1.0f;
-        const int full = egg ? 150 : stage_ == "baby" ? 150 : stage_ == "kind" ? 185 : 215;
-        const int size = inside_view_ ? full * 65 / 100 : full;
 
         // Body: breathing bob (an egg wobbles instead), a hop when happy.
         float t = now / 1000.0f;
@@ -411,10 +501,11 @@ private:
             h = size * 9 / 10;
         }
         lv_obj_set_size(body_, w, h);
-        lv_obj_set_style_border_width(body_, inside_view_ ? 3 : 6, 0);
+        lv_obj_set_style_border_width(body_, in_scene ? 3 : 6, 0);
         lv_obj_align(body_, LV_ALIGN_CENTER, static_cast<int>(x_) + dx, static_cast<int>(y_) + dy);
-        lv_obj_set_style_bg_color(body_, lv_color_hex(egg ? 0xFFF1D0 : kBodyColor), 0);
-        lv_obj_set_style_border_color(body_, lv_color_hex(egg ? 0xE8D5A8 : 0xF0A0B4), 0);
+        const bool sick = status_.sick && !egg;  // ill: a greenish tint
+        lv_obj_set_style_bg_color(body_, lv_color_hex(egg ? 0xFFF1D0 : sick ? 0xD5EFC4 : kBodyColor), 0);
+        lv_obj_set_style_border_color(body_, lv_color_hex(egg ? 0xE8D5A8 : sick ? 0xA9CF8A : 0xF0A0B4), 0);
 
         // Antenna for older stages.
         bool antenna = stage_ == "kind" || stage_ == "volwassen";
@@ -422,7 +513,7 @@ private:
         Show(antenna_ball_, antenna);
         if (antenna) {
             int sway = static_cast<int>(6 * std::sin(t * 1.8f));
-            lv_obj_set_size(antenna_, inside_view_ ? 3 : 6, size / 5);
+            lv_obj_set_size(antenna_, in_scene ? 3 : 6, size / 5);
             lv_obj_align_to(antenna_, body_, LV_ALIGN_OUT_TOP_MID, sway / 2, 6);
             lv_obj_set_size(antenna_ball_, size / 8, size / 8);
             lv_obj_align_to(antenna_ball_, antenna_, LV_ALIGN_OUT_TOP_MID, sway / 2, 4);
@@ -470,7 +561,7 @@ private:
         Show(mouth_open_, open);
         Show(mouth_arc_, !egg && !open);
         int mouth = size * 24 / 100;
-        lv_obj_set_style_arc_width(mouth_arc_, inside_view_ ? 3 : 5, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(mouth_arc_, in_scene ? 3 : 5, LV_PART_MAIN);
         if (open) {
             lv_obj_set_size(mouth_open_, mouth * 6 / 10, mouth / 2);
             lv_obj_align(mouth_open_, LV_ALIGN_CENTER, 0, size * 15 / 100);
@@ -496,16 +587,17 @@ private:
         }
 
         // The most urgent need: a thought bubble and its bar blinking.
-        int need = -1;
-        for (int i = 0; i < 4; i++) {
-            if (mood_ == kNeedMood[i]) need = i;
+        const MoodBubble* mood_bubble = nullptr;
+        for (const auto& b : kBubbles) {
+            if (mood_ == b.mood) mood_bubble = &b;
         }
-        bool bubble = need >= 0 && !egg && !asleep_ && !inside_view_;
+        const int need = mood_bubble ? mood_bubble->need : -1;
+        bool bubble = mood_bubble != nullptr && !egg && !asleep_ && !in_scene;
         Show(bubble_, bubble);
         for (auto* dot : bubble_dots_) Show(dot, bubble);
         if (bubble) {
-            lv_label_set_text_static(bubble_label_, kNeedText[need]);
-            lv_obj_set_style_bg_color(bubble_, lv_color_hex(kNeedColors[need]), 0);
+            lv_label_set_text_static(bubble_label_, mood_bubble->text);
+            lv_obj_set_style_bg_color(bubble_, lv_color_hex(mood_bubble->color), 0);
             int pop = static_cast<int>(3 * std::sin(t * 4.0f));
             lv_obj_align(bubble_, LV_ALIGN_CENTER, 135, -125 + pop);
             // Dots from Mochi's head (up-right, at 45 degrees) toward the bubble.
@@ -516,13 +608,14 @@ private:
             lv_obj_set_size(bubble_dots_[1], 16, 16);
             lv_obj_align(bubble_dots_[1], LV_ALIGN_CENTER, far, -10 - far);
             for (auto* dot : bubble_dots_) {
-                lv_obj_set_style_bg_color(dot, lv_color_hex(kNeedColors[need]), 0);
+                lv_obj_set_style_bg_color(dot, lv_color_hex(mood_bubble->color), 0);
             }
         }
         bool blink_on = (now / 500) % 2 == 0;
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < kBars; i++) {
             Show(bars_[i], !egg);  // bars mean nothing for an egg
-            lv_opa_t opa = (bubble && i == need && !blink_on) ? LV_OPA_30 : LV_OPA_COVER;
+            bool urgent = need >= 0 && kBarNeed[i] == need && !egg && !asleep_;
+            lv_opa_t opa = (urgent && !blink_on) ? LV_OPA_30 : LV_OPA_COVER;
             if (opa != bar_opa_[i]) {  // the arcs span the whole screen: redraw only on change
                 bar_opa_[i] = opa;
                 lv_obj_set_style_arc_opa(bars_[i], opa, LV_PART_INDICATOR);
@@ -600,8 +693,11 @@ private:
         pet.asleep = cJSON_IsTrue(cJSON_GetObjectItem(root, "slaapt"));
         pet.age_days = num("leeftijd_dagen");
         pet.bond = num("band");
-        const char* keys[4] = {"verzadigd", "energie", "plezier", "schoon"};
-        for (int i = 0; i < 4; i++) pet.needs[i] = num(keys[i]);
+        const char* keys[MochiStatus::kNeeds] = {"verzadigd", "energie", "plezier", "schoon",
+                                                 "drinken", "beweging", "gezondheid"};
+        for (int i = 0; i < MochiStatus::kNeeds; i++) pet.needs[i] = num(keys[i]);
+        pet.poop = num("poep");
+        pet.sick = cJSON_IsTrue(cJSON_GetObjectItem(root, "ziek"));
         std::string attention = str("aandacht", "");
         cJSON_Delete(root);
 

@@ -376,7 +376,8 @@ private:
             "Laat Mochi op het scherm naar een plek in zijn huis gaan en daar iets doen. "
             "Gebruik dit wanneer de gebruiker zegt dat Mochi ergens heen moet of iets moet doen "
             "in huis. plek is een van: woonkamer, keuken, badkamer, slaapkamer, tv, bank, bal, "
-            "speelgoed, koelkast, fornuis, tafel, eten, bad, wastafel, bed, buiten.",
+            "speelgoed, koelkast, fornuis, tafel, eten, drinken, bad, wastafel, medicijn, bed, buiten, "
+            "speeltuin, schommel, glijbaan, wip, zandbak, trampoline, voetbal.",
             PropertyList({Property("plek", kPropertyTypeString)}),
             [this](const PropertyList& properties) -> ReturnValue {
                 return display_->MochiGoTo(properties["plek"].value<std::string>());

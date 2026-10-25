@@ -103,6 +103,11 @@ public:
         apple_ = Circle(parent, 22, 0, 0, 0xE74C3C);
         Circle(apple_, 7, 5, -11, 0x2ECC71);
         lv_obj_add_flag(apple_, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+        glass_ = Box(parent, 16, 24, 0, 0, 0xD6EAF8, 3);
+        glass_water_ = Box(glass_, 12, 16, 0, 3, 0x5DADE2, 2);
+        lv_obj_align(glass_water_, LV_ALIGN_BOTTOM_MID, 0, -2);
+        pill_ = Box(parent, 18, 9, 0, 0, 0xFFFFFF, LV_RADIUS_CIRCLE);
+        Box(pill_, 9, 9, -4, 0, 0xE74C3C, LV_RADIUS_CIRCLE);
         ball_ = Circle(parent, 26, 0, 0, 0xFF6B9D);
         Box(ball_, 26, 5, 0, 0, 0xFFFFFF, 2);
         for (auto*& bubble : bubbles_) {
@@ -140,6 +145,9 @@ public:
             {"tafel", kKitchen, 3},         {"eten", kKitchen, 3},
             {"bad", kBathroom, 4},          {"wastafel", kBathroom, 5},
             {"bed", kBedroom, kBedItem},
+            {"drinken", kKitchen, 7},       {"glas", kKitchen, 7},
+            {"water", kKitchen, 7},         {"medicijn", kBathroom, 8},
+            {"medicijnkastje", kBathroom, 8},
         };
         if (place == "buiten") {
             wants_outside_ = true;
@@ -210,7 +218,7 @@ public:
 
 private:
     enum Room { kLivingRoom = 0, kKitchen, kBathroom, kBedroom, kRooms };
-    enum class Act { None, Eat, Sleep, Bath, Tv, Play, Wash };
+    enum class Act { None, Eat, Sleep, Bath, Tv, Play, Wash, Drink, Medicine };
     static constexpr float kFloorY = 92;
     static constexpr int kDoorX[2] = {-172, 172};
     static constexpr float kEntryX[2] = {-120, 120};  // just inside the left/right door
@@ -225,7 +233,7 @@ private:
         Pose pose;
         const char* say;   // sent to the server when the user taps it
     };
-    static constexpr int kItems = 7;
+    static constexpr int kItems = 9;
     static constexpr int kBedItem = 6;
     static constexpr Item kItemList[kItems] = {
         {kLivingRoom, Act::Tv, 72, 62, Pose::Sit, "[In huis: de gebruiker brengt Mochi naar de woonkamer]"},
@@ -236,6 +244,9 @@ private:
         {kBathroom, Act::Bath, -45, 80, Pose::Bath, "[In huis: de gebruiker brengt Mochi naar de badkamer]"},
         {kBathroom, Act::Wash, 72, 92, Pose::Stand, nullptr},
         {kBedroom, Act::Sleep, -38, 74, Pose::Lie, "[In huis: de gebruiker brengt Mochi naar de slaapkamer]"},
+        {kKitchen, Act::Drink, 100, 70, Pose::Sit, "[In huis: de gebruiker geeft Mochi een glas water]"},
+        {kBathroom, Act::Medicine, -10, 92, Pose::Stand,
+         "[In huis: de gebruiker geeft Mochi een medicijn uit het medicijnkastje]"},
     };
 
     lv_obj_t* rooms_[kRooms] = {};
@@ -246,6 +257,9 @@ private:
     lv_obj_t* tap_water_ = nullptr;
     lv_obj_t* apple_ = nullptr;
     lv_obj_t* ball_ = nullptr;
+    lv_obj_t* glass_ = nullptr;
+    lv_obj_t* glass_water_ = nullptr;
+    lv_obj_t* pill_ = nullptr;
     lv_obj_t* bubbles_[3] = {};
 
     int room_ = kLivingRoom;
@@ -385,6 +399,7 @@ private:
         Box(room, 14, 22, 108, 36, 0x85C1E9, 3);                 // glass of water
         Hotspot(room, 2, 140, 150, -80, 30);                     // fridge + stove
         Hotspot(room, 3, 150, 90, 72, 60);                       // table
+        Hotspot(room, 7, 50, 60, 108, 36);                       // glass of water
     }
 
     void BuildBathroom(lv_obj_t* room) {
@@ -407,7 +422,11 @@ private:
         Box(room, 6, 84, 136, 30, 0x95A5A6, 3);                  // towel rail
         Box(room, 34, 64, 128, 40, 0xF1948A, 6);                 // towel
         Box(room, 34, 8, 128, 30, 0xFFFFFF, 2);
+        lv_obj_t* cabinet = Box(room, 54, 46, -30, -92, 0xFFFFFF, 6);  // medicine cabinet
+        Box(cabinet, 8, 26, 0, 0, 0xE74C3C, 1);
+        Box(cabinet, 26, 8, 0, 0, 0xE74C3C, 1);
         Hotspot(room, 4, 190, 90, -45, 80);                      // tub
+        Hotspot(room, 8, 70, 60, -30, -92);                      // medicine cabinet
         Hotspot(room, 5, 100, 140, 72, -20);                     // sink
     }
 
@@ -502,6 +521,8 @@ private:
         if (apple_ != nullptr) {
             mochi_draw::Show(apple_, false);
             mochi_draw::Show(ball_, false);
+            mochi_draw::Show(glass_, false);
+            mochi_draw::Show(pill_, false);
             for (auto* b : bubbles_) mochi_draw::Show(b, false);
         }
     }
@@ -544,6 +565,19 @@ private:
         }
 
         Show(tap_water_, activity_ == Act::Wash);
+
+        bool drinking = activity_ == Act::Drink;
+        Show(glass_, drinking);
+        if (drinking) {
+            lv_obj_align(glass_, LV_ALIGN_CENTER, static_cast<int>(mx) + 30, static_cast<int>(my) + 4);
+            lv_obj_set_height(glass_water_, std::max(1, 16 - static_cast<int>(t * 2)));
+        }
+        bool medicine = activity_ == Act::Medicine;
+        Show(pill_, medicine && t < 4);
+        if (medicine) {
+            lv_obj_align(pill_, LV_ALIGN_CENTER, static_cast<int>(mx) + 26 - static_cast<int>(t * 5),
+                         static_cast<int>(my) + 6);
+        }
 
         static const uint32_t kTv[4] = {0x6FD3FF, 0xFF9F43, 0x2ECC71, 0xFF6B9D};
         uint32_t screen = activity_ == Act::Tv ? kTv[(now_ / 700) % 4] : 0x2C3E50;

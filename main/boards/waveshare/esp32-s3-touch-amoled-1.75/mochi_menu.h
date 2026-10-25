@@ -52,7 +52,9 @@ public:
 
 private:
     static constexpr int kPages = 4;  // 0 = home (Mochi), 1 status, 2 naam, 3 instellingen
-    static constexpr uint32_t kNeedColors[4] = {0xFF9F43, 0xFFD93D, 0xFF6B9D, 0x4FC3F7};
+    static constexpr int kNeeds = MochiStatus::kNeeds;
+    static constexpr uint32_t kNeedColors[kNeeds] = {
+        0xFF9F43, 0xFFD93D, 0xFF6B9D, 0x4FC3F7, 0x48C9B0, 0x58D68D, 0xA9DFBF};
 
     MochiFace* face_;
     Display* display_;
@@ -63,8 +65,9 @@ private:
 
     lv_obj_t* status_title_ = nullptr;
     lv_obj_t* status_info_ = nullptr;
-    lv_obj_t* status_bars_[4] = {};
-    lv_obj_t* status_values_[4] = {};
+    lv_obj_t* status_bars_[kNeeds] = {};
+    lv_obj_t* status_values_[kNeeds] = {};
+    lv_obj_t* status_extra_ = nullptr;
 
     lv_obj_t* name_area_ = nullptr;
     lv_obj_t* name_feedback_ = nullptr;
@@ -143,10 +146,11 @@ private:
     void BuildStatusPage() {
         status_title_ = NewPage(1, "Status");
         lv_obj_t* page = pages_[1];
-        status_info_ = Text(page, "", 0, -125, 0xB8B0FF);
-        static const char* const kNames[4] = {"Eten", "Energie", "Plezier", "Schoon"};
-        for (int i = 0; i < 4; i++) {
-            int y = -70 + i * 52;
+        status_info_ = Text(page, "", 0, -138, 0xB8B0FF);
+        static const char* const kNames[kNeeds] = {"Eten", "Energie", "Plezier", "Schoon",
+                                                   "Drinken", "Beweging", "Gezond"};
+        for (int i = 0; i < kNeeds; i++) {
+            int y = -104 + i * 34;
             Text(page, kNames[i], -95, y);
             lv_obj_t* bar = lv_bar_create(page);
             lv_obj_set_size(bar, 150, 14);
@@ -157,6 +161,7 @@ private:
             status_bars_[i] = bar;
             status_values_[i] = Text(page, "", 140, y);
         }
+        status_extra_ = Text(page, "", 0, 140, 0xF5B7B1);
     }
 
     void RefreshStatus() {
@@ -168,9 +173,18 @@ private:
         snprintf(info, sizeof(info), "%s  |  %d %s  |  band %d%%%s", stage.c_str(), s.age_days,
                  s.age_days == 1 ? "dag" : "dagen", s.bond, s.asleep ? "  |  slaapt" : "");
         lv_label_set_text(status_info_, info);
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < kNeeds; i++) {
             lv_bar_set_value(status_bars_[i], s.needs[i], LV_ANIM_OFF);
             lv_label_set_text_fmt(status_values_[i], "%d", s.needs[i]);
+        }
+        if (s.sick && s.poop) {
+            lv_label_set_text_fmt(status_extra_, "Ziek  |  %d x poep", s.poop);
+        } else if (s.sick) {
+            lv_label_set_text(status_extra_, "Ziek: geef een medicijn");
+        } else if (s.poop) {
+            lv_label_set_text_fmt(status_extra_, "%d x poep opruimen", s.poop);
+        } else {
+            lv_label_set_text(status_extra_, "");
         }
     }
 

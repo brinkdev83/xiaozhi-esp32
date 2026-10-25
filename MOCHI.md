@@ -36,6 +36,20 @@ dan knippert dat boogje en verschijnt er een denkwolkje ("Honger!",
 OTA-URL. Wil Mochi aandacht en is het bord idle, dan start hij zelf een
 gesprek met `[Mochi wil aandacht: ...]`.
 
+## Huis en menu's
+
+`mochi_house.h`: tik buiten op het huisje om binnen te komen. Vier ingerichte
+kamers (woonkamer, keuken, badkamer, slaapkamer), elk een eigen scherm, met
+deuren ertussen; de linkerdeur van de woonkamer gaat naar buiten. Tik op een
+meubel en Mochi loopt erheen en doet het (tv kijken, met de bal spelen, eten,
+in bad, slapen); de server voert de verzorging uit via `[In huis: ...]`. Laat
+je hem met rust, dan scharrelt hij zelf rond en gaat hij bij een lage behoefte
+naar de juiste kamer.
+
+`mochi_menu.h`: veeg naar links of tik op de pijltjes voor Status, Naam (met
+toetsenbord, opgeslagen via `POST /mochi/naam`) en Instellingen (volume,
+helderheid).
+
 ## Bouwen en flashen (ESP-IDF release/v6.1)
 
 ```

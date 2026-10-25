@@ -20,6 +20,7 @@
 #include "settings.h"
 #include "motion_detector.h"
 #include "mochi_face.h"
+#include "mochi_menu.h"
 
 #include <esp_lcd_touch_cst9217.h>
 #include <esp_lvgl_port.h>
@@ -128,6 +129,7 @@ public:
                 lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
             }
             face_ = new MochiFace(lv_screen_active());
+            menu_ = new MochiMenu(face_, this);
             lv_display_add_event_cb(display_, rounder_event_cb, LV_EVENT_INVALIDATE_AREA, NULL);
         }
         state_poller_ = new MochiStatePoller(face_, this);
@@ -146,6 +148,7 @@ public:
 private:
     MochiFace* face_ = nullptr;
     MochiStatePoller* state_poller_ = nullptr;
+    MochiMenu* menu_ = nullptr;
 
     // Mochi: the panel is a 466 px circle, so keep everything inside it. The
     // circle is ~190 px wide 25 px below the top and ~290 px wide 50 px above

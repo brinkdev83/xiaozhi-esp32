@@ -18,7 +18,8 @@
                 "CONFIG_BOARD_TYPE_WAVESHARE_ESP32_S3_TOUCH_AMOLED_1_75=y",
                 "CONFIG_USE_DEVICE_AEC=y",
                 "CONFIG_OTA_URL=\"http://192.168.1.22:8003/xiaozhi/ota/\"",
-                "CONFIG_USE_MULTILINE_CHAT_MESSAGE=y"
+                "CONFIG_USE_MULTILINE_CHAT_MESSAGE=y",
+                "CONFIG_LV_USE_KEYBOARD=y"
             ]
         },
         {

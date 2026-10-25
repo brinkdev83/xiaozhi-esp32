@@ -11,6 +11,7 @@
 #include "application.h"
 #include "board.h"
 #include "display/display.h"
+#include "mochi_house.h"
 
 #include <cJSON.h>
 #include <cmath>
@@ -20,6 +21,24 @@
 #include <freertos/task.h>
 #include <lvgl.h>
 #include <string>
+
+// The pet's state as served by /mochi/state (core/utils/mochi_pet.py:device_state()).
+struct MochiStatus {
+    std::string name = "Mochi";
+    std::string stage = "baby";
+    std::string mood = "gewoon";
+    bool asleep = false;
+    int age_days = 0;
+    int bond = 0;
+    int needs[4] = {80, 80, 80, 80};  // eten, energie, plezier, schoon
+};
+
+// Base URL of the Mochi server: the host of the OTA URL.
+inline std::string MochiServerUrl(const char* path) {
+    std::string ota = CONFIG_OTA_URL;
+    auto pos = ota.find("/xiaozhi/ota/");
+    return (pos == std::string::npos ? ota : ota.substr(0, pos)) + path;
+}
 
 class MochiFace {
 public:
@@ -56,7 +75,7 @@ public:
         }
 
         BuildOutside();
-        BuildInside();
+        house_.BuildBackground(root_);
 
         antenna_ = Shape(root_, 0xF0A0B4);
         antenna_ball_ = Shape(root_, 0xFF80A0);
@@ -85,6 +104,8 @@ public:
         lv_obj_set_style_arc_color(mouth_arc_, lv_color_hex(0x322038), LV_PART_MAIN);
         lv_obj_set_style_arc_rounded(mouth_arc_, true, LV_PART_MAIN);
         mouth_open_ = Shape(body_, 0x96284A);
+
+        house_.BuildForeground(root_);  // tub front, duvet and props over Mochi
 
         zzz_ = lv_label_create(root_);
         lv_label_set_text(zzz_, "z Z z");
@@ -124,18 +145,19 @@ public:
         emotion_until_ = lv_tick_get() + 6000;
     }
 
-    // State from the server, see core/utils/mochi_pet.py:device_state().
-    void ApplyState(const std::string& stage, const std::string& mood, bool asleep,
-                    const int needs[4]) {
-        stage_ = stage;
-        mood_ = mood;
-        asleep_ = asleep;
+    void ApplyState(const MochiStatus& status) {
+        status_ = status;
+        stage_ = status.stage;
+        mood_ = status.mood;
+        asleep_ = status.asleep;
         for (int i = 0; i < 4; i++) {
-            needs_[i] = needs[i];
-            lv_arc_set_value(bars_[i], needs[i]);
+            lv_arc_set_value(bars_[i], status.needs[i]);
         }
-        dirty_ = needs[3] < 35;
+        dirty_ = status.needs[3] < 35;
     }
+
+    const MochiStatus& status() const { return status_; }
+    void SetName(const std::string& name) { status_.name = name; }
 
 private:
     enum class Look { Normal, Happy, Sad, Sleepy, Surprised };
@@ -147,6 +169,7 @@ private:
 
     lv_obj_t* root_ = nullptr;
     lv_obj_t* bars_[4] = {};
+    lv_opa_t bar_opa_[4] = {LV_OPA_COVER, LV_OPA_COVER, LV_OPA_COVER, LV_OPA_COVER};
     lv_obj_t* body_ = nullptr;
     lv_obj_t* antenna_ = nullptr;
     lv_obj_t* antenna_ball_ = nullptr;
@@ -162,16 +185,10 @@ private:
     lv_obj_t* bubble_dots_[2] = {};
     lv_timer_t* timer_ = nullptr;
 
-    // Scenes: outside with a little house; inside with four rooms.
-    enum Room { kBedroom = 0, kKitchen, kBathroom, kLivingRoom };
-    static constexpr int kRoomX[4] = {-85, 85, -85, 85};
-    static constexpr int kRoomY[4] = {-60, -60, 95, 95};
-    static constexpr const char* kRoomName[4] = {"de slaapkamer", "de keuken", "de badkamer", "de woonkamer"};
-    static constexpr uint32_t kIdleOutsideMs = 90000;
+    // Scenes: outside with a little house; inside, MochiHouse's rooms.
     lv_obj_t* outside_ = nullptr;
-    lv_obj_t* inside_ = nullptr;
+    MochiHouse house_;
     bool inside_view_ = false;
-    uint32_t last_tap_ = 0;
     float x_ = 0, y_ = -10;          // Mochi's centre (animated)
     float target_x_ = 0, target_y_ = -10;
 
@@ -181,7 +198,7 @@ private:
     uint32_t emotion_until_ = 0;
     bool asleep_ = false;
     bool dirty_ = false;
-    int needs_[4] = {80, 80, 80, 80};
+    MochiStatus status_;
     uint32_t next_blink_ = 3000;
 
     static void Plain(lv_obj_t* obj) {
@@ -200,10 +217,13 @@ private:
         return obj;
     }
 
+    // Only touches the flag on a real change: LVGL redraws the object on every
+    // HIDDEN flag write, and this runs 20 times a second.
     static void Show(lv_obj_t* obj, bool visible) {
-        if (visible) {
+        bool hidden = lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN);
+        if (visible && hidden) {
             lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
-        } else {
+        } else if (!visible && !hidden) {
             lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
         }
     }
@@ -261,51 +281,6 @@ private:
         Box(house, 20, 18, 16, 18, 0x6FD3FF, 3);            // window
     }
 
-    // Inside: bedroom, kitchen, bathroom and living room, plus a door outside.
-    void BuildInside() {
-        inside_ = Layer(root_);
-        static const uint32_t kWall[4] = {0x5B4B8A, 0x3E7C59, 0x2F6E8E, 0x8E5B3E};
-        static const char* const kLabel[4] = {"Slapen", "Eten", "Bad", "TV"};
-        for (int i = 0; i < 4; i++) {
-            lv_obj_t* room = Box(inside_, 150, 140, kRoomX[i], kRoomY[i] - 10, kWall[i], 24);
-            lv_obj_set_user_data(room, reinterpret_cast<void*>(static_cast<intptr_t>(i)));
-            Clickable(room, &MochiFace::OnRoomClicked, this);
-            lv_obj_t* label = lv_label_create(room);
-            lv_label_set_text_static(label, kLabel[i]);
-            lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
-            lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 8);
-        }
-        lv_obj_t* bed = lv_obj_get_child(inside_, kBedroom);
-        Box(bed, 104, 34, 0, 40, 0x8B5A2B);                  // bed frame
-        Box(bed, 72, 24, 10, 32, 0x7FB3FF);                  // blanket
-        Box(bed, 26, 16, -36, 30, 0xFFFFFF, LV_RADIUS_CIRCLE);  // pillow
-
-        lv_obj_t* kitchen = lv_obj_get_child(inside_, kKitchen);
-        Box(kitchen, 34, 70, -40, 24, 0xDDE6EA);             // fridge
-        Box(kitchen, 56, 34, 22, 42, 0x555555);              // stove
-        Box(kitchen, 16, 16, 12, 34, 0xE74C3C, LV_RADIUS_CIRCLE);  // hot plate
-        Box(kitchen, 16, 16, 34, 34, 0x888888, LV_RADIUS_CIRCLE);
-
-        lv_obj_t* bath = lv_obj_get_child(inside_, kBathroom);
-        Box(bath, 100, 38, 0, 40, 0xFFFFFF, 18);             // tub
-        Box(bath, 84, 12, 0, 30, 0x6FD3FF, 6);               // water
-        Box(bath, 14, 14, -20, 16, 0xE8F8FF, LV_RADIUS_CIRCLE);  // bubbles
-        Box(bath, 10, 10, 2, 10, 0xE8F8FF, LV_RADIUS_CIRCLE);
-        Box(bath, 12, 12, 22, 18, 0xE8F8FF, LV_RADIUS_CIRCLE);
-
-        lv_obj_t* living = lv_obj_get_child(inside_, kLivingRoom);
-        Box(living, 64, 42, 0, 0, 0x222222);                 // tv
-        Box(living, 54, 32, 0, 0, 0x6FD3FF, 3);              // screen
-        Box(living, 104, 22, 0, 48, 0xC0392B, 10);           // couch seat
-        Box(living, 104, 16, 0, 32, 0xA93226, 8);            // couch back
-
-        lv_obj_t* door = Box(inside_, 44, 56, 0, 178, 0x8E5B3E, 8);
-        Box(door, 6, 6, 12, 2, 0xFFD93D, LV_RADIUS_CIRCLE);
-        Clickable(door, &MochiFace::OnDoorClicked, this);
-
-        Show(inside_, false);
-    }
-
     static void OnIndevPressed(lv_event_t* e) {
         auto* indev = static_cast<lv_indev_t*>(lv_event_get_target(e));
         lv_point_t point;
@@ -321,35 +296,17 @@ private:
         static_cast<MochiFace*>(lv_event_get_user_data(e))->SetInside(true);
     }
 
-    static void OnDoorClicked(lv_event_t* e) {
-        ESP_LOGI("MochiFace", "door clicked");
-        static_cast<MochiFace*>(lv_event_get_user_data(e))->SetInside(false);
-    }
-
-    static void OnRoomClicked(lv_event_t* e) {
-        auto* self = static_cast<MochiFace*>(lv_event_get_user_data(e));
-        auto* room = static_cast<lv_obj_t*>(lv_event_get_current_target(e));
-        ESP_LOGI("MochiFace", "room clicked");
-        self->GoToRoom(static_cast<int>(reinterpret_cast<intptr_t>(lv_obj_get_user_data(room))));
-    }
-
     void SetInside(bool inside) {
         inside_view_ = inside;
-        last_tap_ = lv_tick_get();
-        Show(inside_, inside);
         Show(outside_, !inside);
-        target_x_ = 0;
-        target_y_ = inside ? 10 : -10;
-    }
-
-    // Walk to a room and let Mochi (via the server) do what belongs there.
-    void GoToRoom(int room) {
-        last_tap_ = lv_tick_get();
-        target_x_ = kRoomX[room];
-        target_y_ = kRoomY[room];
-        if (stage_ != "ei") {
-            Application::GetInstance().SendTextEvent(
-                std::string("[In huis: de gebruiker brengt Mochi naar ") + kRoomName[room] + "]");
+        if (inside) {
+            house_.Enter(x_, y_);
+        } else {
+            house_.Leave();
+            x_ = -135;  // out through the front door of the little house
+            y_ = 70;
+            target_x_ = 0;
+            target_y_ = -10;
         }
     }
 
@@ -383,23 +340,37 @@ private:
         const auto state = Application::GetInstance().GetDeviceState();
         const bool speaking = state == kDeviceStateSpeaking;
         const bool listening = state == kDeviceStateListening;
-        const Look look = CurrentLook(now);
+        Look look = CurrentLook(now);
 
-        // Back outside after a while without taps or talking.
-        if (inside_view_ && state == kDeviceStateIdle && now - last_tap_ > kIdleOutsideMs) {
-            SetInside(false);
+        // In the house, MochiHouse decides where Mochi goes and what he does.
+        auto pose = MochiHouse::Pose::Stand;
+        if (inside_view_) {
+            house_.Tick(now, stage_, mood_, asleep_, x_, y_);
+            if (house_.wants_outside()) {
+                SetInside(false);
+            } else {
+                target_x_ = house_.walk_x();
+                target_y_ = house_.walk_y();
+                pose = house_.pose();
+            }
         }
-        // Asleep inside: off to bed.
-        if (inside_view_ && asleep_) {
-            target_x_ = kRoomX[kBedroom];
-            target_y_ = kRoomY[kBedroom];
+        if (pose == MochiHouse::Pose::Lie) {
+            look = Look::Sleepy;
         }
-        // Walk (ease) toward the target; smaller inside so the rooms fit.
-        x_ += (target_x_ - x_) * 0.12f;
-        y_ += (target_y_ - y_) * 0.12f;
-        const bool walking = std::fabs(target_x_ - x_) + std::fabs(target_y_ - y_) > 4;
+        // Walk at a steady pace toward the target.
+        const float to_x = target_x_ - x_, to_y = target_y_ - y_;
+        const float distance = std::sqrt(to_x * to_x + to_y * to_y);
+        const float pace = inside_view_ ? 3.5f : 6.0f;
+        if (distance <= pace) {
+            x_ = target_x_;
+            y_ = target_y_;
+        } else {
+            x_ += to_x / distance * pace;
+            y_ += to_y / distance * pace;
+        }
+        const bool walking = distance > 1.0f;
         const int full = egg ? 150 : stage_ == "baby" ? 150 : stage_ == "kind" ? 185 : 215;
-        const int size = inside_view_ ? full * 45 / 100 : full;
+        const int size = inside_view_ ? full * 55 / 100 : full;
 
         // Body: breathing bob (an egg wobbles instead), a hop when happy.
         float t = now / 1000.0f;
@@ -408,8 +379,15 @@ private:
         if ((look == Look::Happy || walking) && !egg) {
             dy -= static_cast<int>(size / 15 * std::fabs(std::sin(t * (walking ? 9.0f : 5.0f))));
         }
-        const int w = size;
-        const int h = egg ? size * 6 / 5 : size;
+        int w = size;
+        int h = egg ? size * 6 / 5 : size;
+        if (pose == MochiHouse::Pose::Lie) {
+            w = size * 13 / 10;
+            h = size * 7 / 10;
+            dy = 0;
+        } else if (pose == MochiHouse::Pose::Sit) {
+            h = size * 9 / 10;
+        }
         lv_obj_set_size(body_, w, h);
         lv_obj_set_style_border_width(body_, inside_view_ ? 3 : 6, 0);
         lv_obj_align(body_, LV_ALIGN_CENTER, static_cast<int>(x_) + dx, static_cast<int>(y_) + dy);
@@ -523,7 +501,10 @@ private:
         for (int i = 0; i < 4; i++) {
             Show(bars_[i], !egg);  // bars mean nothing for an egg
             lv_opa_t opa = (bubble && i == need && !blink_on) ? LV_OPA_30 : LV_OPA_COVER;
-            lv_obj_set_style_arc_opa(bars_[i], opa, LV_PART_INDICATOR);
+            if (opa != bar_opa_[i]) {  // the arcs span the whole screen: redraw only on change
+                bar_opa_[i] = opa;
+                lv_obj_set_style_arc_opa(bars_[i], opa, LV_PART_INDICATOR);
+            }
         }
     }
 };
@@ -532,9 +513,7 @@ private:
 class MochiStatePoller {
 public:
     MochiStatePoller(MochiFace* face, Display* display) : face_(face), display_(display) {
-        std::string ota = CONFIG_OTA_URL;
-        auto pos = ota.find("/xiaozhi/ota/");
-        url_ = (pos == std::string::npos ? ota : ota.substr(0, pos)) + "/mochi/state";
+        url_ = MochiServerUrl("/mochi/state");
         xTaskCreate(&MochiStatePoller::TaskEntry, "mochi_state", 6144, this, 2, nullptr);
     }
 
@@ -592,16 +571,21 @@ private:
             cJSON* item = cJSON_GetObjectItem(root, key);
             return cJSON_IsNumber(item) ? item->valueint : 0;
         };
-        std::string stage = str("fase", "baby");
-        std::string mood = str("stemming", "gewoon");
-        bool asleep = cJSON_IsTrue(cJSON_GetObjectItem(root, "slaapt"));
-        int needs[4] = {num("verzadigd"), num("energie"), num("plezier"), num("schoon")};
+        MochiStatus pet;
+        pet.name = str("naam", "Mochi");
+        pet.stage = str("fase", "baby");
+        pet.mood = str("stemming", "gewoon");
+        pet.asleep = cJSON_IsTrue(cJSON_GetObjectItem(root, "slaapt"));
+        pet.age_days = num("leeftijd_dagen");
+        pet.bond = num("band");
+        const char* keys[4] = {"verzadigd", "energie", "plezier", "schoon"};
+        for (int i = 0; i < 4; i++) pet.needs[i] = num(keys[i]);
         std::string attention = str("aandacht", "");
         cJSON_Delete(root);
 
         {
             DisplayLockGuard lock(display_);
-            face_->ApplyState(stage, mood, asleep, needs);
+            face_->ApplyState(pet);
         }
 
         if (!attention.empty() && app.GetDeviceState() == kDeviceStateIdle) {
